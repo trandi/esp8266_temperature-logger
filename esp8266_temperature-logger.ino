@@ -67,6 +67,9 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);     // Initialize the LED_BUILTIN pin as an output
   digitalWrite(LED_BUILTIN, LOW);
 
+  // used to read Battery voltage
+  pinMode(A0, INPUT);
+  float battVoltage = analogRead(A0) / 1023.0 * 4.13; // 4.13 found empirically for a Sony NP-BX1 3.6V LiIon battery
   
   cout << endl << "Secs WHEN MCU Started: " << getULongFromRTC(RTC_MEM_ADDR_SECONDS_MCU_STARTED) << " / Millis SINCE MCU Started: " << (getULongFromRTC(RTC_MEM_ADDR_MILLIS_SINCE_MCU_STARTED) + millis()) << endl;
 
@@ -142,9 +145,9 @@ void setup() {
       
       /* 3. TEMP & Humidity */
       if(tempSensor.get() == 0){
-        cout << endl << "Secs,Temp,Humidity" << endl;
+        cout << endl << "Secs,Temp,Humidity,Batt" << endl;
     
-        sprintf(charbuff, "%d,%.2f,%.2f\n", getSecs(), tempSensor.cTemp, tempSensor.humidity);
+        sprintf(charbuff, "%d,%.2f,%.2f,%.2f\n", getSecs(), tempSensor.cTemp, tempSensor.humidity, battVoltage);
         cout << charbuff;
         file.write(charbuff);
       } else{
