@@ -1,4 +1,10 @@
-// Using an ESP8266 on a Wemos D1 mini board: https://wiki.wemos.cc/products:d1:d1_mini
+/** 
+ *  Using:
+ *  ESP8266 on a Wemos D1 mini board: https://wiki.wemos.cc/products:retired:d1_mini_v3.0.0
+ *  D1 Mini Single Lithium Battery Charging And Battery Boost Shield Board https://wiki.wemos.cc/products:d1_mini_shields:battery_shield
+ *  SD card shield https://www.banggood.com/Geekcreit-Micro-SD-Card-Shield-For-D1-Mini-TF-WiFi-ESP8266-Compatible-SD-Wireless-Module-For-Arduino-p-1160026.html?utm_design=131&utm_email=1572075673_2324_08&utm_source=emarsys&utm_medium=Shipoutinform190813&utm_campaign=trigger-emarsys&utm_content=Gakki&sc_src=email_2671705&sc_eh=4f22392a9436e65e1&sc_llid=16869311&sc_lid=104858042&sc_uid=3jcmGIU5Xx&cur_warehouse=CN
+ *  Wemos SHT30 shield https://wiki.wemos.cc/products:retired:sht30_shield_v2.0.0
+ */
 
 #include <SPI.h> 
 #include "SdFat.h"
@@ -43,15 +49,16 @@ const char* password  = "***";
 String thingspeakServer = "api.thingspeak.com";
 String thingspeakChannel = "***";
 String thingspeakWriteKey = "***";
+const int thingspeakMaxUpdates = 960 / 4; // we have 4 messages for each update
 
 /* TIME KEEPING */
 const char* ntpServer = "ch.pool.ntp.org";
 
-// Seconds since 1st Jan 1900 + 3782926500  (just so that we don't waste all this space for nothing)
+// Seconds since 1st Jan 1900 - SECS_OFFSET is what we store  (just so that we don't waste all this space for nothing)
 unsigned long SECS_OFFSET = 3782926500;
 unsigned long _secondsWhenMCUStarted = 0;
 unsigned long DEEP_SLEEP_MILLIS = 5 * 60 * 1000;
-double TIME_DRIFT_FRACTION = 0.983; //empirically found that real time is SLOWER than what this MCU thinks
+double TIME_DRIFT_FRACTION = 0.982; //empirically found that real time is SLOWER than what this MCU thinks
 
 
 /* ESP8266 RTC system memory that persists during deep sleep */
@@ -100,12 +107,12 @@ void setup() {
 
       /* NTP */
       sendNTPrequest();
-      unsigned long secondsSince1900 = parseNTPresponse();
+      unsigned long secondsSince1900 = parseNTPresponseToSecsSince1900();
       // wait for a reponse, but max 3 seconds
       for(int i=0; secondsSince1900 == 0 && i < 3000; i++) {
         delay(1);
         
-        secondsSince1900 = parseNTPresponse();
+        secondsSince1900 = parseNTPresponseToSecsSince1900();
       }
   
       if(secondsSince1900 == 0) {
@@ -172,16 +179,30 @@ void setup() {
       String secsOfLastLineAlreadySentStr = String(secsOfLastLineAlreadySent);
       long previousLineSeconds = 0;
       boolean addToUpdates = false;
+      int updatesCount = 0;
 
       while(sdin.getline(line_buffer, LINE_BUFF_SIZE, '\n')) {
         String line(line_buffer);
         long lineSeconds = parseFirstField(line);
         long relativeSeconds = lineSeconds - previousLineSeconds;
-        if(relativeSeconds < 0) relativeSeconds = 0;
         previousLineSeconds = lineSeconds;
+        
+        //thingspeak doesn't like time not moving or going backwards
+        // this can happen after an NTP request if the internal time keeping was running fast...
+        if(relativeSeconds <= 0) relativeSeconds = 1; 
+        
 
         if(addToUpdates) {
-          updates = updates + relativeSeconds + "," + removeFirstField(line) + "|";
+          String newUpdate = String("") + relativeSeconds + "," + removeFirstField(line) + "|";
+          
+          if(updatesCount >= thingspeakMaxUpdates) {
+            // we've already reached the max no of updates so continue to add but remove the oldest one at the same time
+            updates = updates.substring(updates.indexOf("|") + 1) + newUpdate;
+          } else {
+            updates = updates + newUpdate;
+          }
+          
+          updatesCount ++;
         }
 
         if(line.indexOf(secsOfLastLineAlreadySentStr) >= 0){
@@ -191,6 +212,7 @@ void setup() {
       }
 
       // send the data to the cloud
+      cout << "Prepared " << updatesCount << " updates for the cloud (limited to LAST " << thingspeakMaxUpdates << " if necessary)." << endl;
       int httpRequestResponse = thingspeakHttpRequest(updates);
       if(httpRequestResponse == 202) {
         // now remember the last line that was sent
@@ -235,7 +257,7 @@ String removeFirstField(String line) {
 }
 
 unsigned long getSecs() {
-  unsigned long secondsSinceMCUStarted = _secondsWhenMCUStarted +  millisSinceStartIncludingDeepSleep() / 1000 * TIME_DRIFT_FRACTION;
+  unsigned long secondsSinceMCUStarted = _secondsWhenMCUStarted +  millisSinceStartIncludingDeepSleep() / 1000.0 * TIME_DRIFT_FRACTION;
   return secondsSinceMCUStarted;
 }
 
@@ -271,7 +293,7 @@ void sendNTPrequest() {
 
 // returns Excel time, ie. seconds since 1st Jan 1900
 // in Excel do "=secsSince1900/86400 + 2" in a cell formatted as time to get the human readable form (86400 secs in a day + 2 days not sure why)
-unsigned long parseNTPresponse() {
+unsigned long parseNTPresponseToSecsSince1900() {
   int cb = udpNtpClient.parsePacket();
   if(cb == 0) {
     return 0; // haven't received a response yet
