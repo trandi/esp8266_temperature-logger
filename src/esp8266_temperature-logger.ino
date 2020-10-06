@@ -57,7 +57,7 @@ const char* ntpServer = "ch.pool.ntp.org";
 // Seconds since 1st Jan 1900 - SECS_OFFSET is what we store  (just so that we don't waste all this space for nothing)
 unsigned long SECS_OFFSET = 3782926500;
 unsigned long _secondsWhenMCUStarted = 0;
-unsigned long DEEP_SLEEP_MILLIS = 5 * 60 * 1000;
+unsigned long DEEP_SLEEP_MILLIS = 15 * 60 * 1000;
 double TIME_DRIFT_FRACTION = 0.982; //empirically found that real time is SLOWER than what this MCU thinks
 
 
